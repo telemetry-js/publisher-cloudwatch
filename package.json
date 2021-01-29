@@ -1,6 +1,6 @@
 {
   "name": "@telemetry-js/publisher-cloudwatch",
-  "version": "0.4.2",
+  "version": "1.0.0",
   "description": "Publish single or summary metrics to AWS CloudWatch",
   "license": "MIT",
   "author": "Vincent Weevers",
