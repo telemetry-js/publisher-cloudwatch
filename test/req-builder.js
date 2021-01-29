@@ -14,9 +14,10 @@ const RequestBuilder = proxyquire('../lib/req-builder', {
 })
 
 const NAMESPACE = 'test'
+const REQ_DATUM_LIMIT = 20
 
 test('RequestBuilder', function (t) {
-  t.plan(8)
+  t.plan(6)
 
   const builder = new RequestBuilder({
     namespace: NAMESPACE
@@ -128,17 +129,14 @@ test('RequestBuilder', function (t) {
     }]
   })
 
-  builder.send({ date }, (err, statusCode, requestID) => {
+  builder.send({ date }, (err) => {
     t.ifError(err, 'no send error')
-    t.is(statusCode, 200, 'http 200')
-    t.is(requestID, 'abc', 'got requestID')
-
     scope.done()
   })
 })
 
 test('retry', function (t) {
-  t.plan(11)
+  t.plan(9)
 
   const builder = new RequestBuilder({
     namespace: NAMESPACE,
@@ -259,17 +257,14 @@ test('retry', function (t) {
       }]
     })
 
-  builder.send({ date }, (err, statusCode, requestID) => {
+  builder.send({ date }, (err) => {
     t.ifError(err, 'no send error')
-    t.is(statusCode, 200, 'http 200')
-    t.is(requestID, 'abc', 'got requestID')
-
     scope.done()
   })
 })
 
 test('disable retry', function (t) {
-  t.plan(3)
+  t.plan(2)
 
   const builder = new RequestBuilder({
     namespace: NAMESPACE,
@@ -306,10 +301,8 @@ test('disable retry', function (t) {
       return [500, '']
     })
 
-  builder.send((err, statusCode) => {
+  builder.send((err) => {
     t.is(err.message, 'HTTP 500')
-    t.is(statusCode, 500)
-
     scope.done()
   })
 })
@@ -349,11 +342,84 @@ test('timeout', function (t) {
   const scope = nock('https://monitoring.us-east-1.amazonaws.com')
     .post('/').socketDelay(2000).reply(200, 'foo')
 
-  builder.send((err, statusCode) => {
+  builder.send((err) => {
     t.is(err.message, 'Socket timeout (200ms)')
     scope.done()
   })
 })
+
+for (let i = 0; i < 10; i++) {
+  // Randomize input
+  const datumCount = i === 0 ? REQ_DATUM_LIMIT : i === 1 ? REQ_DATUM_LIMIT + 1 : random(1, REQ_DATUM_LIMIT * 3)
+  const requestCount = Math.ceil(datumCount / REQ_DATUM_LIMIT)
+
+  // Instantiate here, to test that builder can be reused
+  const builder = new RequestBuilder({ namespace: NAMESPACE }, {
+    sign (body, customDate, callback) {
+      process.nextTick(callback, null, {
+        hostname: 'localhost',
+        path: '/',
+        method: 'POST',
+        body
+      })
+    }
+  })
+
+  test(`batches requests (${i}, ${datumCount} over ${requestCount})`, function (t) {
+    t.plan(requestCount + 1)
+
+    const scope = nock('https://localhost').post('/').times(requestCount).reply(200, '')
+    const bodies = []
+
+    for (let i = 0; i < datumCount; i++) {
+      builder.addSingleMetric({
+        name: 'test.count',
+        date: new Date(1),
+        unit: 'count',
+        resolution: 60,
+        value: i
+      })
+    }
+
+    for (let r = 0; r < requestCount; r++) {
+      let expectedBody = 'Action=PutMetricData&Version=2010-08-01&Namespace=test'
+      let value = r * REQ_DATUM_LIMIT
+
+      for (let i = 1; i <= REQ_DATUM_LIMIT && value < datumCount; i++) {
+        expectedBody += `&MetricData.member.${i}.MetricName=test.count&MetricData.member.${i}.Unit=Count&MetricData.member.${i}.Timestamp=1970-01-01T00%3A00%3A00Z&MetricData.member.${i}.Value=${value}`
+        value++
+      }
+
+      bodies.push(expectedBody)
+    }
+
+    builder.on('send', onsend)
+
+    function onsend (requestOptions) {
+      t.same(requestOptions.body, bodies.shift())
+    }
+
+    builder.send(function (err) {
+      builder.removeListener('send', onsend)
+      scope.done()
+      t.is(err, null)
+    })
+
+    let child = builder
+
+    while (child !== null) {
+      if (child._body !== '' || child._datumCount !== 0) {
+        throw new Error('Did not reset synchronously')
+      }
+
+      child = child._child
+    }
+  })
+}
+
+function random (min, max) {
+  return Math.floor(Math.random() * (max - min + 1) + min)
+}
 
 function fixture () {
   return [
