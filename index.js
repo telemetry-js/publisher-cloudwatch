@@ -63,11 +63,13 @@ class CloudWatchPublisher extends EventEmitter {
 
   // Exposed for standalone usage
   flush (options, callback) {
+    let promise
+
     if (typeof options === 'function') {
       callback = options
       options = null
     } else if (callback === undefined) {
-      var promise = new Promise((resolve, reject) => {
+      promise = new Promise((resolve, reject) => {
         callback = function (err, result) {
           if (err) reject(err)
           else resolve(result)

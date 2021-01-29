@@ -22,7 +22,7 @@
     "hallmark": "^3.1.0",
     "nock": "^11.8.2",
     "proxyquire": "^2.1.0",
-    "standard": "^14.3.4",
+    "standard": "^16.0.3",
     "tape": "^4.9.1"
   },
   "repository": "telemetry-js/publisher-cloudwatch",
